@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>এআই ছবি স্টুডিও</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Noto Sans Bengali","Kalpurush",sans-serif; background:#0b0d12; color:#e5e7eb; }
+  header { padding:14px 16px; border-bottom:1px solid #1f2430; position:sticky; top:0; background:#0b0d12; z-index:5; }
+  header h1 { margin:0 0 10px; font-size:18px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; }
+  select, input, textarea, button { font-family:inherit; font-size:15px; border-radius:10px; border:1px solid #2a3040; background:#151a24; color:#e5e7eb; padding:9px 11px; }
+  button { cursor:pointer; background:#2a3040; }
+  button.main { background:#6366f1; border-color:#6366f1; font-weight:600; }
+  button.small { padding:6px 9px; font-size:13px; }
+  button:disabled { opacity:.5; }
+  .wrap { padding:14px 16px; max-width:1200px; margin:0 auto; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px; }
+  .card { background:#11151d; border:1px solid #1f2430; border-radius:14px; overflow:hidden; display:flex; flex-direction:column; }
+  .card .num { padding:8px 12px; font-size:13px; color:#9ca3af; display:flex; justify-content:space-between; }
+  .card textarea { width:calc(100% - 20px); margin:0 10px 8px; height:70px; resize:vertical; }
+  .view { margin:0 10px; aspect-ratio:var(--ar); background:#0b0d12; border-radius:10px; display:flex; align-items:center; justify-content:center; color:#6b7280; font-size:13px; overflow:hidden; text-align:center; }
+  .view img { width:100%; height:100%; object-fit:cover; cursor:zoom-in; }
+  .acts { display:flex; gap:6px; padding:10px; }
+  #lb { display:none; position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:20; align-items:center; justify-content:center; padding:10px; }
+  #lb img { max-width:100%; max-height:100%; border-radius:8px; }
+  #msg { color:#9ca3af; font-size:13px; margin:8px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 এআই ছবি স্টুডিও</h1>
+  <div class="bar">
+    <select id="proj"></select>
+    <button id="newP" class="small">+ নতুন প্রজেক্ট</button>
+    <button id="renP" class="small">নাম বদলান</button>
+    <button id="delP" class="small">মুছুন</button>
+  </div>
+  <div class="bar" style="margin-top:8px">
+    <select id="ratio">
+      <option value="1920x1080">১৬:৯ HD (১৯২০×১০৮০)</option>
+      <option value="1080x1920">৯:১৬ HD (১০৮০×১৯২০)</option>
+      <option value="1536x1536">১:১ HD (১৫৩৬×১৫৩৬)</option>
+    </select>
+    <select id="count"></select>
+    <button id="all" class="main">সবগুলো বানান</button>
+  </div>
+  <p id="msg"></p>
+</header>
+<div class="wrap"><div class="grid" id="grid"></div></div>
+<div id="lb"><img id="lbimg"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const MAX = 15;
+let db = { projects: [], current: 0 };
+try { db = JSON.parse(localStorage.getItem("studio") || "") || db; } catch (e) {}
+if (!db.projects || !db.projects.length) db = { projects: [mk("প্রজেক্ট ১")], current: 0 };
+
+function mk(name) {
+  return { name, ratio: "1920x1080", count: 10,
+    slots: Array.from({ length: MAX }, () => ({ prompt: "", url: "" })) };
+}
+function save() { try { localStorage.setItem("studio", JSON.stringify(db)); } catch (e) {} }
+function P() { return db.projects[db.current]; }
+
+for (let i = 5; i <= MAX; i++) $("count").add(new Option(i + "টি ছবি", i));
+
+function render() {
+  $("proj").innerHTML = "";
+  db.projects.forEach((p, i) => $("proj").add(new Option(p.name, i)));
+  $("proj").value = db.current;
+  const p = P();
+  $("ratio").value = p.ratio;
+  $("count").value = p.count;
+  const [w, h] = p.ratio.split("x");
+  const g = $("grid");
+  g.innerHTML = "";
+  g.style.setProperty("--ar", w + "/" + h);
+  for (let i = 0; i < p.count; i++) {
+    const s = p.slots[i];
+    const c = document.createElement("div");
+    c.className = "card";
+    c.innerHTML = `<div class="num"><span>ছবি ${i + 1}</span></div>
+      <textarea placeholder="প্রম্পট লিখুন (বাংলা বা ইংরেজি)"></textarea>
+      <div class="view" style="--ar:${w}/${h}" id="v${i}">${s.url ? "" : "খালি"}</div>
+      <div class="acts"><button class="small main" data-a="gen">বানান</button>
+      <button class="small" data-a="dl" ${s.url ? "" : "disabled"}>ডাউনলোড</button></div>`;
+    const ta = c.querySelector("textarea");
+    ta.value = s.prompt;
+    ta.oninput = () => { s.prompt = ta.value; save(); };
+    c.querySelector('[data-a="gen"]').onclick = () => gen(i);
+    c.querySelector('[data-a="dl"]').onclick = () => dl(i);
+    g.appendChild(c);
+    if (s.url) show(i, s.url);
+  }
+}
+
+function show(i, url) {
+  const v = $("v" + i); if (!v) return;
+  v.innerHTML = "";
+  const im = new Image(); im.src = url;
+  im.onclick = () => { $("lbimg").src = url; $("lb").style.display = "flex"; };
+  v.appendChild(im);
+}
+$("lb").onclick = () => $("lb").style.display = "none";
+
+async function toEnglish(t) {
+  try {
+    const r = await fetch("https://text.pollinations.ai/" + encodeURIComponent(
+      "Translate to English as a detailed image prompt. Reply with only the translation: " + t));
+    return (await r.text()).trim() || t;
+  } catch (e) { return t; }
+}
+
+async function gen(i) {
+  const p = P(), s = p.slots[i];
+  const v = $("v" + i);
+  if (!s.prompt.trim()) { if (v) v.textContent = "আগে প্রম্পট লিখুন"; return; }
+  if (v) v.textContent = "বানানো হচ্ছে...";
+  const en = /[\u0980-\u09FF]/.test(s.prompt) ? await toEnglish(s.prompt) : s.prompt;
+  const [w, h] = p.ratio.split("x");
+  const url = "https://image.pollinations.ai/prompt/" + encodeURIComponent(en + ", ultra detailed, high quality, 4k") +
+    "?width=" + w + "&height=" + h + "&seed=" + Math.floor(Math.random() * 1e6) + "&nologo=true&model=flux";
+  await new Promise(res => {
+    const im = new Image();
+    im.onload = () => { s.url = url; save(); show(i, url); enableDl(i); res(); };
+    im.onerror = () => { if (v) v.textContent = "ব্যর্থ, আবার চাপুন"; res(); };
+    im.src = url;
+  });
+}
+function enableDl(i) {
+  const b = $("grid").children[i]?.querySelector('[data-a="dl"]');
+  if (b) b.disabled = false;
+}
+async function dl(i) {
+  const url = P().slots[i].url; if (!url) return;
+  try {
+    const b = await (await fetch(url)).blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = P().name + "-" + (i + 1) + ".png";
+    a.click();
+  } catch (e) { window.open(url, "_blank"); }
+}
+
+$("all").onclick = async () => {
+  const p = P();
+  const todo = [];
+  for (let i = 0; i < p.count; i++) if (p.slots[i].prompt.trim()) todo.push(i);
+  if (!todo.length) { $("msg").textContent = "কোনো প্রম্পট লেখা হয়নি।"; return; }
+  $("all").disabled = true;
+  let done = 0;
+  const next = async () => {
+    while (todo.length) {
+      const i = todo.shift();
+      await gen(i);
+      done++;
+      $("msg").textContent = "সম্পন্ন: " + done + "/" + (done + todo.length);
+    }
+  };
+  // একসাথে ২টি করে চলবে, যাতে ফ্রি সার্ভিস আটকে না যায়
+  await Promise.all([next(), next()]);
+  $("msg").textContent = "সব ছবি তৈরি হয়ে গেছে ✅";
+  $("all").disabled = false;
+};
+
+$("proj").onchange = e => { db.current = +e.target.value; save(); render(); };
+$("ratio").onchange = e => { P().ratio = e.target.value; P().slots.forEach(s => s.url = ""); save(); render(); };
+$("count").onchange = e => { P().count = +e.target.value; save(); render(); };
+$("newP").onclick = () => {
+  const n = prompt("প্রজেক্টের নাম:", "প্রজেক্ট " + (db.projects.length + 1));
+  if (!n) return;
+  db.projects.push(mk(n)); db.current = db.projects.length - 1; save(); render();
+};
+$("renP").onclick = () => { const n = prompt("নতুন নাম:", P().name); if (n) { P().name = n; save(); render(); } };
+$("delP").onclick = () => {
+  if (db.projects.length < 2) { $("msg").textContent = "অন্তত একটি প্রজেক্ট থাকতে হবে।"; return; }
+  if (confirm("এই প্রজেক্ট মুছবেন?")) { db.projects.splice(db.current, 1); db.current = 0; save(); render(); }
+};
+render();
+</script>
+</body>
+</html>
